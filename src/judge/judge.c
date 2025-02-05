@@ -118,13 +118,13 @@ int run_test(const char *in_path, const char *expected_out, double *exec_time, l
 
 int main(void)
 {
-    printf("compile submission\n");
+    // printf("compile submission\n");
     if (compile_submission() != 0)
     {
         printf("compile failed\n");
         return 1;
     }
-    printf("compile success: executable file created -> %s\n", EXECUTABLE_PATH);
+    // printf("compile success: executable file created -> %s\n", EXECUTABLE_PATH);
     DIR *dir = opendir(IO_DIR);
     if (!dir)
     {
@@ -158,20 +158,18 @@ int main(void)
                 char expected_path[256];
                 snprintf(expected_path, sizeof(expected_path), "%s/%s", IO_DIR, expected_output);
 
-                printf("test case: input = %s, expected output = %s\n", in_path, expected_path);
+                // printf("test case: input = %s, expected output = %s\n", in_path, expected_path);
                 double exec_time = 0;
                 long mem_usage = 0;
                 int test_result = run_test(in_path, expected_path, &exec_time, &mem_usage);
                 if (!test_result)
                 {
-                    printf("test case '%s' failed\n", entry->d_name);
+                    // printf("test case '%s' failed\n", entry->d_name);
                     all_passed = 0;
-                    break;
                 }
                 else
                 {
-                    printf("test case '%s' passed, execution time: %.3f sec, memory usage: %ld KB\n",
-                           entry->d_name, exec_time, mem_usage);
+                    // printf("test case '%s' passed, execution time: %.3f sec, memory usage: %ld KB\n", entry->d_name, exec_time, mem_usage);
                     if (exec_time > max_total_time)
                         max_total_time = exec_time;
                     if (mem_usage > max_total_rss)
@@ -182,17 +180,14 @@ int main(void)
     }
     closedir(dir);
 
-    // 3. 결과 보고
     if (all_passed)
     {
         printf("\nAccepted\n");
         printf("time: %.3f sec, memory: %ld KB\n", max_total_time, max_total_rss);
-        // 성공 메시지와 함께 시간/메모리 정보를 클라이언트에 전송할 수 있음.
     }
     else
     {
         printf("\nWrong Answer\n");
-        // 실패 메시지를 클라이언트에 전송할 수 있음.
     }
 
     return 0;

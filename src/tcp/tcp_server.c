@@ -12,7 +12,7 @@
 #define BACKLOG 5
 /**
  * Header format:
- * 8 bytes: message type
+ * 8 bytes: file type
  * 8 bytes: file size
  */
 #define HEADER_SIZE 16
@@ -72,7 +72,7 @@ int start_tcp_server(void)
 
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) == -1)
     {
-        perror("setsockopt");
+        perror("setsockopt failed");
         close(server_fd);
         exit(EXIT_FAILURE);
     }
@@ -106,7 +106,7 @@ int start_tcp_server(void)
 
     printf("Client connected: %s:%d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
 
-    printf("Reading header\n");
+    // printf("Reading header\n");
     char header[HEADER_SIZE];
     if (read_multiple_bytes(client_fd, header, HEADER_SIZE) != HEADER_SIZE)
     {
@@ -124,7 +124,7 @@ int start_tcp_server(void)
     memcpy(&net_file_size, header + 8, 8);
     uint64_t file_size = be64toh(net_file_size);
 
-    printf("Received header: %s, file size: %lu\n", msg_type, file_size);
+    // printf("Received header: %s, file size: %lu\n", msg_type, file_size);
 
     FILE *file = fopen("files/receive/received_file.c", "wb");
     if (file == NULL)
@@ -166,32 +166,70 @@ int start_tcp_server(void)
     }
     else
     {
-        printf("File received successfully\n");
+        // printf("File received successfully\n");
+        if (send_text_result(client_fd, "File received successfully\n") == -1)
+        {
+            close(client_fd);
+            close(server_fd);
+            exit(EXIT_FAILURE);
+        }
     }
 
     fclose(file);
 
-    if (send_text_result(client_fd, "File received successfully\n") == -1)
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1)
     {
+        perror("pipe failed");
         close(client_fd);
         close(server_fd);
         exit(EXIT_FAILURE);
     }
-    char *result = "";
+
+    char *result;
     pid_t pid = fork();
     if (pid < 0)
     {
         perror("fork failed");
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
+        close(client_fd);
+        close(server_fd);
         exit(EXIT_FAILURE);
     }
     else if (pid == 0)
     {
+        close(pipe_fd[0]);
+        if (dup2(pipe_fd[1], STDOUT_FILENO) == -1)
+        {
+            perror("dup2(stdout) failed");
+            exit(EXIT_FAILURE);
+        }
+        close(pipe_fd[1]);
         execl("build/src/judge", "judge", (char *)NULL);
         perror("execl failed");
         exit(EXIT_FAILURE);
     }
     else
     {
+        close(pipe_fd[1]);
+
+        char result_buffer[1024];
+        size_t total_read = 0;
+        ssize_t r;
+        while ((r = read(pipe_fd[0], buffer, sizeof(buffer))) > 0)
+        {
+            if (total_read + r < sizeof(result_buffer))
+            {
+                memcpy(result_buffer + total_read, buffer, r);
+                total_read += r;
+            }
+            else
+            {
+                break;
+            }
+        }
+        close(pipe_fd[0]);
         int status;
         waitpid(pid, &status, 0);
         if (WIFEXITED(status))
@@ -202,8 +240,24 @@ int start_tcp_server(void)
         {
             printf("judge process exited abnormally\n");
         }
+
+        if (total_read < sizeof(result_buffer))
+        {
+            result_buffer[total_read] = '\0';
+            result = result_buffer;
+        }
+        else
+        {
+            result = "Result too long";
+        }
+        if (send_text_result(client_fd, result) == -1)
+        {
+            close(client_fd);
+            close(server_fd);
+            exit(EXIT_FAILURE);
+        }
     }
-    printf("Judge finished, bye\n");
+    printf("Judge finished\n");
 
     close(client_fd);
     close(server_fd);

@@ -1,3 +1,6 @@
+#pragma once
+#ifndef _DEFINESHIT_H
+#define _DEFINESHIT_H
 #ifndef NULL
 #define NULL 0
 #endif
@@ -17,3 +20,4 @@
 #ifndef size_t
 typedef unsigned long size_t;
 #endif
+#endif // _DEFINESHIT_H
