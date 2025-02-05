@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <endian.h> // htobe64, be64toh (Linux)
 #include "tcp_client.h"
+#include "defineshit.h"
 
 #define HEADER_SIZE 16
 #define TEXTFILE "TEXTFILE"

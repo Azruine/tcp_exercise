@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include "tcp_server.h"
+#include "defineshit.h"
 
 #define PORT 49999
 #define BACKLOG 5
@@ -105,7 +106,7 @@ int start_tcp_server(void)
 
     printf("Received header: %s, file size: %lu\n", msg_type, file_size);
 
-    FILE *file = fopen("files/receive/temp", "wb");
+    FILE *file = fopen("files/receive/received_file.c", "wb");
     if (file == NULL)
     {
         perror("fopen failed");

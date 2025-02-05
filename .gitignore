@@ -2,3 +2,4 @@ build
 files
 .devcontainer
 .vscode
+temp
