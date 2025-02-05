@@ -8,6 +8,11 @@
 
 #define PORT 49999
 #define BACKLOG 5
+/**
+ * Header format:
+ * 8 bytes: message type
+ * 8 bytes: file size
+ */
 #define HEADER_SIZE 16
 
 ssize_t read_multiple_bytes(int sockfd, void *buffer, size_t count)
