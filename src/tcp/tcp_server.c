@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include "tcp_server.h"
@@ -15,6 +16,25 @@
  * 8 bytes: file size
  */
 #define HEADER_SIZE 16
+
+int send_text_result(int client_fd, const char *text)
+{
+    size_t total_sent = 0;
+    size_t text_len = strlen(text);
+    ssize_t sent;
+
+    while (total_sent < text_len)
+    {
+        sent = send(client_fd, text + total_sent, text_len - total_sent, 0);
+        if (sent < 0)
+        {
+            perror("send failed");
+            return -1;
+        }
+        total_sent += sent;
+    }
+    return 0;
+}
 
 ssize_t read_multiple_bytes(int sockfd, void *buffer, size_t count)
 {
@@ -143,13 +163,47 @@ int start_tcp_server(void)
         close(client_fd);
         close(server_fd);
         exit(EXIT_FAILURE);
-    }   
-    else 
+    }
+    else
     {
         printf("File received successfully\n");
     }
 
     fclose(file);
+
+    if (send_text_result(client_fd, "File received successfully\n") == -1)
+    {
+        close(client_fd);
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+    char *result = "";
+    pid_t pid = fork();
+    if (pid < 0)
+    {
+        perror("fork failed");
+        exit(EXIT_FAILURE);
+    }
+    else if (pid == 0)
+    {
+        execl("build/src/judge", "judge", (char *)NULL);
+        perror("execl failed");
+        exit(EXIT_FAILURE);
+    }
+    else
+    {
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status))
+        {
+            printf("judge process exited with status %d\n", WEXITSTATUS(status));
+        }
+        else
+        {
+            printf("judge process exited abnormally\n");
+        }
+    }
+    printf("Judge finished, bye\n");
 
     close(client_fd);
     close(server_fd);
