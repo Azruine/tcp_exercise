@@ -1,8 +1,5 @@
 #ifndef TCP_SERVER_H
 #define TCP_SERVER_H
-#ifndef SO_REUSEPORT
-#define SO_REUSEPORT 15
-#endif
 
 /**
  * @brief start tcp server

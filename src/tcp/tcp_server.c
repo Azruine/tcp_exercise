@@ -5,7 +5,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include "tcp_server.h"
-#include "defineshit.h"
+#include "../defineshit.h"
 
 #define PORT 49999
 #define BACKLOG 5
