@@ -9,33 +9,34 @@
 #include <errno.h>
 #include "../defineshit.h"
 
-#define SOURCE_PATH "files/receive/received_file.c"
-#define EXECUTABLE_PATH "temp/solution"
 #define TEMP_OUTPUT "temp/temp_output"
 #define IO_DIR "io"
 
 /**
- * @brief Compile the submission
- * @return result of the compilation
+ * @brief Compile the submission.
+ * @param source_path path to the source file.
+ * @param executable_path path to the compiled executable.
  */
-int compile_submission()
+int compile_submission(const char *source_path, const char *executable_path)
 {
     char command[512];
-    snprintf(command, sizeof(command), "gcc %s -o %s", SOURCE_PATH, EXECUTABLE_PATH);
+    snprintf(command, sizeof(command), "gcc %s -o %s", source_path, executable_path);
     printf("compile command: %s\n", command);
     int ret = system(command);
     return ret;
 }
 
 /**
- * @brief Run the compiled submission
- * @param in_path path to the input file
- * @param expected_out path to the expected output file
- * @param exec_time execution time in ms (output)
- * @param max_rss used memory (output)
- * @return result of the execution, 1 for true, 0 for false
+ * @brief Run the compiled submission against a test case.
+ *
+ * @param in_path path to the input file.
+ * @param expected_out path to the expected output file.
+ * @param exec_time execution time in ms (output).
+ * @param max_rss used memory (output).
+ * @param executable_path path to the compiled executable.
+ * @return 1 if test passed, 0 if failed.
  */
-int run_test(const char *in_path, const char *expected_out, int *exec_time, long *max_rss)
+int run_test(const char *in_path, const char *expected_out, int *exec_time, long *max_rss, const char *executable_path)
 {
     pid_t pid = fork();
     if (pid < 0)
@@ -51,7 +52,6 @@ int run_test(const char *in_path, const char *expected_out, int *exec_time, long
             perror("fopen failed");
             exit(1);
         }
-
         int fd_in = fileno(fin);
         if (dup2(fd_in, STDIN_FILENO) == -1)
         {
@@ -74,7 +74,7 @@ int run_test(const char *in_path, const char *expected_out, int *exec_time, long
         }
         fclose(fout);
 
-        execl(EXECUTABLE_PATH, "solution", (char *)NULL);
+        execl(executable_path, "solution", (char *)NULL);
         perror("execl failed");
         exit(1);
     }
@@ -115,16 +115,39 @@ int run_test(const char *in_path, const char *expected_out, int *exec_time, long
         {
             result = 0;
         }
-
         fclose(f1);
         fclose(f2);
         return result;
     }
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
-    if (compile_submission() != 0)
+    if (argc != 2)
+    {
+        fprintf(stderr, "Usage: %s <source_file_path>\n", argv[0]);
+        return 1;
+    }
+    const char *source_path = argv[1];
+
+    const char *base = strrchr(source_path, '/');
+    if (base)
+        base++;
+    else
+        base = source_path;
+
+    char base_name[256];
+    strncpy(base_name, base, sizeof(base_name));
+    base_name[sizeof(base_name) - 1] = '\0';
+    char *dot = strrchr(base_name, '.');
+    if (dot)
+    {
+        *dot = '\0';
+    }
+    char executable_path[256];
+    snprintf(executable_path, sizeof(executable_path), "temp/%s", base_name);
+
+    if (compile_submission(source_path, executable_path) != 0)
     {
         printf("compile failed\n");
         return 1;
@@ -134,6 +157,7 @@ int main(void)
     if (!dir)
     {
         perror("opendir failed");
+        remove(executable_path);
         return 1;
     }
 
@@ -165,7 +189,7 @@ int main(void)
 
                 int exec_time = 0;
                 long mem_usage = 0;
-                int test_result = run_test(in_path, expected_path, &exec_time, &mem_usage);
+                int test_result = run_test(in_path, expected_path, &exec_time, &mem_usage, executable_path);
                 if (!test_result)
                 {
                     all_passed = 0;
@@ -181,6 +205,11 @@ int main(void)
         }
     }
     closedir(dir);
+
+    if (remove(executable_path) != 0)
+    {
+        perror("remove compiled executable failed");
+    }
 
     if (all_passed)
     {

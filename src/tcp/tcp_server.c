@@ -1,5 +1,5 @@
 #include "tcp_server.h"
-#include "../defineshit.h" // 필요에 따라 정의들을 포함하세요.
+#include "../defineshit.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,19 +13,20 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <endian.h>
+#include <time.h>
 
-// 종료 플래그 (volatile sig_atomic_t 타입은 신호 핸들러에서 안전하게 사용할 수 있음)
+// server running flag (volatile sig_atomic_t는 signal handler에서 안전하게 사용 가능)
 volatile sig_atomic_t server_running = 1;
 
 void sigint_handler(int signum)
 {
-    (void)signum;       // 사용하지 않는 인자 경고 제거
-    server_running = 0; // 서버 종료를 알림
+    (void)signum;       // remove unused warning
+    server_running = 0; // set the flag to stop the server
 }
 
 void sigchld_handler(int signo)
 {
-    (void)signo; // 사용하지 않는 인자에 대한 경고 제거
+    (void)signo; // remove unused warning
     while (waitpid(-1, NULL, WNOHANG) > 0)
         ;
 }
@@ -36,7 +37,7 @@ void sigchld_handler(int signo)
 #define BUFFER_SIZE 1024
 #define JUDGE_RESULT_SIZE 1024
 
-// client connection status
+// client connection state
 typedef enum
 {
     STATE_READING_HEADER,
@@ -47,30 +48,32 @@ typedef enum
 } conn_state;
 
 /**
- * @brief The client connection structure
+ * @brief client connection structure
  */
 typedef struct client_conn
 {
     int fd;                               // client socket file descriptor
     struct sockaddr_in addr;              // client address
-    conn_state state;                     // connection state
-    char header[HEADER_SIZE];             // header
-    size_t header_bytes;                  // header bytes received
-    uint64_t file_size;                   // sent file size
-    uint64_t file_received;               // received file size
-    FILE *fp;                             // file pointer
-    int judge_pipe_fd;                    // judge process pipe file descriptor
-    char judge_result[JUDGE_RESULT_SIZE]; // judge result
-    size_t judge_result_len;              // size of judge result
-    size_t judge_sent;                    // sent judge result size
-    struct client_conn *next;             // linked list next pointer
+    conn_state state;                     // client connection state
+    char header[HEADER_SIZE];             // header buffer
+    size_t header_bytes;                  // byte size of the header received
+    uint64_t file_size;                   // byte size of the file to send
+    uint64_t file_received;               // byte size of the file received
+    FILE *fp;                             // file pointer for the received file
+    int judge_pipe_fd;                    // pipe file descriptor for the judge process / non-blocking
+    char judge_result[JUDGE_RESULT_SIZE]; // judge result buffer
+    size_t judge_result_len;              // judge result byte size
+    size_t judge_sent;                    // byte size of the judge result sent
+    char source_filename[256];            // source file name
+    struct client_conn *next;             // next client connection
 } client_conn;
 
+// linked list of client connections
 static client_conn *conn_list = NULL;
 
 /**
- * @brief Set the file descriptor to non-blocking mode
- * @param fd The file descriptor
+ * @brief set the file descriptor to non-blocking mode
+ * @param fd file descriptor
  */
 static void set_nonblocking(int fd)
 {
@@ -88,8 +91,8 @@ static void set_nonblocking(int fd)
 }
 
 /**
- * @brief Add the connection to the list
- * @param conn The client connection
+ * @brief add connection to the connection list
+ * @param conn client connection
  */
 static void add_connection(client_conn *conn)
 {
@@ -98,8 +101,8 @@ static void add_connection(client_conn *conn)
 }
 
 /**
- * @brief Remove the connection from the list
- * @param conn The client connection
+ * @brief remove connection from the connection list
+ * @param conn client connection
  */
 static void remove_connection(client_conn *conn)
 {
@@ -123,8 +126,8 @@ static void remove_connection(client_conn *conn)
 }
 
 /**
- * @brief Spawn the judge process
- * @param conn The client connection
+ * @brief spawn judge process
+ * @param conn client connection
  */
 static void spawn_judge(client_conn *conn)
 {
@@ -154,7 +157,8 @@ static void spawn_judge(client_conn *conn)
             exit(EXIT_FAILURE);
         }
         close(pipe_fd[1]);
-        execl("build/src/judge", "judge", (char *)NULL);
+
+        execl("build/src/judge", "judge", conn->source_filename, (char *)NULL);
         perror("execl failed");
         exit(EXIT_FAILURE);
     }
@@ -167,8 +171,8 @@ static void spawn_judge(client_conn *conn)
 }
 
 /**
- * @brief Read the header from the client
- * @param conn The client connection
+ * @brief read header data from the client
+ * @param conn client connection
  */
 static void handle_read_header(client_conn *conn)
 {
@@ -194,7 +198,14 @@ static void handle_read_header(client_conn *conn)
         memcpy(&net_file_size, conn->header + 8, 8);
         conn->file_size = be64toh(net_file_size);
         conn->file_received = 0;
-        conn->fp = fopen("files/receive/received_file.c", "wb");
+
+        char filename[256];
+        snprintf(filename, sizeof(filename), "files/receive/%s_%ld.c",
+                 inet_ntoa(conn->addr.sin_addr), time(NULL));
+
+        strncpy(conn->source_filename, filename, sizeof(conn->source_filename));
+        conn->source_filename[sizeof(conn->source_filename) - 1] = '\0';
+        conn->fp = fopen(filename, "wb");
         if (!conn->fp)
         {
             perror("fopen failed");
@@ -206,8 +217,8 @@ static void handle_read_header(client_conn *conn)
 }
 
 /**
- * @brief Read the file from the client
- * @param conn The client connection
+ * @brief read file data from the client
+ * @param conn client connection
  */
 static void handle_read_file(client_conn *conn)
 {
@@ -244,8 +255,8 @@ static void handle_read_file(client_conn *conn)
 }
 
 /**
- * @brief Read the judge result from the pipe
- * @param conn The client connection
+ * @brief read judge result from the pipe
+ * @param conn client connection
  */
 static void handle_read_judge(client_conn *conn)
 {
@@ -282,8 +293,8 @@ static void handle_read_judge(client_conn *conn)
 }
 
 /**
- * @brief Send the judge result to the client
- * @param conn The client connection
+ * @brief send judge result to the client
+ * @param conn client connection
  */
 static void handle_send_result(client_conn *conn)
 {
@@ -304,6 +315,10 @@ static void handle_send_result(client_conn *conn)
     }
 }
 
+/**
+ * @brief start TCP server
+ * @return 0 on success.
+ */
 int start_tcp_server(void)
 {
     signal(SIGCHLD, sigchld_handler);
@@ -311,9 +326,8 @@ int start_tcp_server(void)
     struct sigaction sa_int;
     sa_int.sa_handler = sigint_handler;
     sigemptyset(&sa_int.sa_mask);
-    // DO NOT use SA_RESTART flag here, it will cause accept() to be restarted
-    sa_int.sa_flags = 0;
 
+    sa_int.sa_flags = 0;
     if (sigaction(SIGINT, &sa_int, NULL) == -1)
     {
         perror("sigaction SIGINT failed");
@@ -352,10 +366,8 @@ int start_tcp_server(void)
 
     fd_set read_fds, write_fds;
     int max_fd;
-    while (1)
+    while (server_running)
     {
-        if (errno == EINTR && !server_running)
-            break;
         FD_ZERO(&read_fds);
         FD_ZERO(&write_fds);
         FD_SET(listen_fd, &read_fds);
@@ -386,6 +398,8 @@ int start_tcp_server(void)
         int activity = select(max_fd + 1, &read_fds, &write_fds, NULL, NULL);
         if (activity < 0)
         {
+            if (errno == EINTR)
+                continue;
             perror("select failed");
             break;
         }
