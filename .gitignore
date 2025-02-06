@@ -1,5 +1,9 @@
 build
-files
+files/receive/*
+!files/receive/.gitkeep
+files/send/*
+!files/send/.gitkeep
 .devcontainer
 .vscode
-temp
+temp/*
+!temp/.gitkeep
