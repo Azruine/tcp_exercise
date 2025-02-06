@@ -8,6 +8,25 @@
 #include "tcp_server.h"
 #include "../defineshit.h"
 
+#include <signal.h>
+#include <errno.h>
+
+// 종료 플래그 (volatile sig_atomic_t 타입은 신호 핸들러에서 안전하게 사용할 수 있음)
+volatile sig_atomic_t server_running = 1;
+
+void sigint_handler(int signum)
+{
+    (void)signum;       // 사용하지 않는 인자 경고 제거
+    server_running = 0; // 서버 종료를 알림
+}
+
+void sigchld_handler(int signo)
+{
+    (void)signo; // 사용하지 않는 인자에 대한 경고 제거
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
+}
+
 #define PORT 49999
 #define BACKLOG 5
 /**
@@ -57,54 +76,9 @@ ssize_t read_multiple_bytes(int sockfd, void *buffer, size_t count)
     return nread;
 }
 
-int start_tcp_server(void)
+void handle_client(int client_fd, struct sockaddr_in client_addr)
 {
-    int server_fd, client_fd;
-    struct sockaddr_in address;
-    int opt = 1;
-    socklen_t addrlen = sizeof(address);
-
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-    {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
-
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) == -1)
-    {
-        perror("setsockopt failed");
-        close(server_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
-
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == -1)
-    {
-        perror("bind failed");
-        close(server_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    if (listen(server_fd, BACKLOG) == -1)
-    {
-        perror("listen failed");
-        close(server_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    printf("TCP server waiting for client on port %d\n", PORT);
-
-    if ((client_fd = accept(server_fd, (struct sockaddr *)&address, &addrlen)) == -1)
-    {
-        perror("accept failed");
-        close(server_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Client connected: %s:%d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+    printf("Client connected: %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
     // printf("Reading header\n");
     char header[HEADER_SIZE];
@@ -112,7 +86,6 @@ int start_tcp_server(void)
     {
         perror("read header failed");
         close(client_fd);
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
@@ -131,7 +104,6 @@ int start_tcp_server(void)
     {
         perror("fopen failed");
         close(client_fd);
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
     uint64_t remaining_size = file_size;
@@ -148,7 +120,6 @@ int start_tcp_server(void)
             perror("read file failed");
             fclose(file);
             close(client_fd);
-            close(server_fd);
             exit(EXIT_FAILURE);
         }
 
@@ -161,18 +132,16 @@ int start_tcp_server(void)
         perror("file size mismatch");
         fclose(file);
         close(client_fd);
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
     else
     {
         // printf("File received successfully\n");
-        if (send_text_result(client_fd, "File received successfully\n") == -1)
-        {
-            close(client_fd);
-            close(server_fd);
-            exit(EXIT_FAILURE);
-        }
+        // if (send_text_result(client_fd, "File received successfully\n") == -1)
+        // {
+        //     close(client_fd);
+        //     exit(EXIT_FAILURE);
+        // }
     }
 
     fclose(file);
@@ -182,7 +151,6 @@ int start_tcp_server(void)
     {
         perror("pipe failed");
         close(client_fd);
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
@@ -194,7 +162,6 @@ int start_tcp_server(void)
         close(pipe_fd[0]);
         close(pipe_fd[1]);
         close(client_fd);
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
     else if (pid == 0)
@@ -253,14 +220,109 @@ int start_tcp_server(void)
         if (send_text_result(client_fd, result) == -1)
         {
             close(client_fd);
-            close(server_fd);
             exit(EXIT_FAILURE);
         }
     }
     printf("Judge finished\n");
 
     close(client_fd);
-    close(server_fd);
+    exit(EXIT_SUCCESS);
+}
 
+int start_tcp_server(void)
+{
+    signal(SIGCHLD, sigchld_handler);
+
+    struct sigaction sa_int;
+    sa_int.sa_handler = sigint_handler;
+    sigemptyset(&sa_int.sa_mask);
+    // DO NOT use SA_RESTART flag here, it will cause accept() to be restarted
+    sa_int.sa_flags = 0;
+
+    if (sigaction(SIGINT, &sa_int, NULL) == -1)
+    {
+        perror("sigaction SIGINT failed");
+        exit(EXIT_FAILURE);
+    }
+    int server_fd, client_fd;
+    struct sockaddr_in address;
+    int opt = 1;
+    socklen_t addrlen = sizeof(address);
+
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) == -1)
+    {
+        perror("setsockopt failed");
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == -1)
+    {
+        perror("bind failed");
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(server_fd, BACKLOG) == -1)
+    {
+        perror("listen failed");
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("TCP server waiting for client on port %d\n", PORT);
+
+    while (1)
+    {
+        socklen_t client_addr_len = sizeof(address);
+        if ((client_fd = accept(server_fd, (struct sockaddr *)&address, &client_addr_len)) == -1)
+        {
+            if (errno == EINTR)
+            {
+                if (!server_running)
+                {
+                    break;
+                }
+                else
+                {
+                    continue;
+                }
+            }
+            perror("accept failed");
+            close(server_fd);
+            exit(EXIT_FAILURE);
+        }
+
+        pid_t pid = fork();
+        if (pid < 0)
+        {
+            perror("fork failed");
+            close(client_fd);
+            close(server_fd);
+            exit(EXIT_FAILURE);
+        }
+        else if (pid == 0)
+        {
+            close(server_fd);
+            handle_client(client_fd, address);
+        }
+        else
+        {
+            close(client_fd);
+        }
+    }
+
+    printf("Server shutting down\n");
+    close(server_fd);
     return 0;
 }

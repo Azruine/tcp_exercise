@@ -4,7 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <endian.h> // htobe64, be64toh (Linux)
+#include <endian.h>
 #include "tcp_client.h"
 #include "../defineshit.h"
 
