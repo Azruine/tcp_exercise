@@ -1,3 +1,6 @@
+#pragma once
+#ifndef _DEFINESHIT_H
+#define _DEFINESHIT_H
 #ifndef NULL
 #define NULL 0
 #endif
@@ -14,6 +17,19 @@
 #define STDERR_FILENO 2
 #endif
 
+#ifndef SO_REUSEPORT
+#define SO_REUSEPORT 15
+#endif
+
+#ifndef sig_atomic_t
+typedef int sig_atomic_t;
+#endif
+
 #ifndef size_t
 typedef unsigned long size_t;
 #endif
+
+#ifndef errno
+extern int errno;
+#endif
+#endif // _DEFINESHIT_H

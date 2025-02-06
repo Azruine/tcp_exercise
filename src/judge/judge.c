@@ -31,11 +31,11 @@ int compile_submission()
  * @brief Run the compiled submission
  * @param in_path path to the input file
  * @param expected_out path to the expected output file
- * @param exec_time execution time
- * @param max_rss used memory
+ * @param exec_time execution time in ms (output)
+ * @param max_rss used memory (output)
  * @return result of the execution, 1 for true, 0 for false
  */
-int run_test(const char *in_path, const char *expected_out, double *exec_time, long *max_rss)
+int run_test(const char *in_path, const char *expected_out, int *exec_time, long *max_rss)
 {
     pid_t pid = fork();
     if (pid < 0)
@@ -53,7 +53,6 @@ int run_test(const char *in_path, const char *expected_out, double *exec_time, l
         }
 
         int fd_in = fileno(fin);
-
         if (dup2(fd_in, STDIN_FILENO) == -1)
         {
             perror("dup2(stdin) failed");
@@ -88,6 +87,13 @@ int run_test(const char *in_path, const char *expected_out, double *exec_time, l
             perror("wait4 failed");
             return 0;
         }
+
+        *max_rss = usage.ru_maxrss;
+
+        int utime_ms = usage.ru_utime.tv_sec * 1000 + usage.ru_utime.tv_usec / 1000;
+        int stime_ms = usage.ru_stime.tv_sec * 1000 + usage.ru_stime.tv_usec / 1000;
+        *exec_time = utime_ms + stime_ms;
+
         FILE *f1 = fopen(expected_out, "r");
         FILE *f2 = fopen(TEMP_OUTPUT, "r");
         if (!f1 || !f2)
@@ -118,13 +124,12 @@ int run_test(const char *in_path, const char *expected_out, double *exec_time, l
 
 int main(void)
 {
-    printf("compile submission\n");
     if (compile_submission() != 0)
     {
         printf("compile failed\n");
         return 1;
     }
-    printf("compile success: executable file created -> %s\n", EXECUTABLE_PATH);
+
     DIR *dir = opendir(IO_DIR);
     if (!dir)
     {
@@ -133,7 +138,7 @@ int main(void)
     }
 
     struct dirent *entry;
-    double max_total_time = 0;
+    int max_total_time = 0;
     long max_total_rss = 0;
     int all_passed = 1;
 
@@ -158,20 +163,15 @@ int main(void)
                 char expected_path[256];
                 snprintf(expected_path, sizeof(expected_path), "%s/%s", IO_DIR, expected_output);
 
-                printf("test case: input = %s, expected output = %s\n", in_path, expected_path);
-                double exec_time = 0;
+                int exec_time = 0;
                 long mem_usage = 0;
                 int test_result = run_test(in_path, expected_path, &exec_time, &mem_usage);
                 if (!test_result)
                 {
-                    printf("test case '%s' failed\n", entry->d_name);
                     all_passed = 0;
-                    break;
                 }
                 else
                 {
-                    printf("test case '%s' passed, execution time: %.3f sec, memory usage: %ld KB\n",
-                           entry->d_name, exec_time, mem_usage);
                     if (exec_time > max_total_time)
                         max_total_time = exec_time;
                     if (mem_usage > max_total_rss)
@@ -182,17 +182,14 @@ int main(void)
     }
     closedir(dir);
 
-    // 3. 결과 보고
     if (all_passed)
     {
         printf("\nAccepted\n");
-        printf("time: %.3f sec, memory: %ld KB\n", max_total_time, max_total_rss);
-        // 성공 메시지와 함께 시간/메모리 정보를 클라이언트에 전송할 수 있음.
+        printf("time: %d ms, memory: %ld KB\n", max_total_time, max_total_rss);
     }
     else
     {
         printf("\nWrong Answer\n");
-        // 실패 메시지를 클라이언트에 전송할 수 있음.
     }
 
     return 0;

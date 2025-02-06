@@ -2,11 +2,49 @@
 #define TCP_CLIENT_H
 
 /**
- * @brief send file to server
- * @param server_ip server ip address in string format. i.e. "127.0.0.1"
- * @param port server port number
- * @param filename file name to send
+ * @brief Send all data in the buffer
+ * @param sockfd socket file descriptor
+ * @param buffer data to send
+ * @param length length of the data
+ * @return number of bytes sent, or -1 on error
  */
-int send_file(const char *server_ip, int port, const char *filename);
+ssize_t send_all(int sockfd, const void *buffer, size_t length);
+
+/**
+ * @brief Connect to the server
+ * @param server_ip server IP address
+ * @param port server port number
+ * @return socket file descriptor, or -1 on error
+ */
+int connect_to_server(const char *server_ip, int port);
+
+/**
+ * @brief Send file data to the server
+ * @param sockfd socket file descriptor
+ * @param filename name of the file to send
+ * @return 0 on success, -1 on error
+ */
+int send_file_data(int sockfd, const char *filename);
+
+/**
+ * @brief Receive judge result from the server
+ * @param sockfd socket file descriptor
+ * @return 0 on success, -1 on error
+ */
+int receive_judge_result(int sockfd);
+
+/**
+ * @brief Close the connection
+ * @param sockfd socket file descriptor
+ */
+void close_connection(int sockfd);
+
+/**
+ * @brief Send file to the server
+ * @param sockfd socket file descriptor
+ * @param filename name of the file to send
+ * @return 0 on success, -1 on error
+ */
+int send_file(int sockfd, const char *filename);
 
 #endif // TCP_CLIENT_H
