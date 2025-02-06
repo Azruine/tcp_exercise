@@ -40,7 +40,7 @@ int receive_judge_result(int sockfd);
 void close_connection(int sockfd);
 
 /**
- * @brief Send file to the server
+ * @brief Send file to the server and receive judge result
  * @param sockfd socket file descriptor
  * @param filename name of the file to send
  * @return 0 on success, -1 on error

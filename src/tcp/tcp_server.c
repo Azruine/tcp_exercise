@@ -1,15 +1,18 @@
+#include "tcp_server.h"
+#include "../defineshit.h" // 필요에 따라 정의들을 포함하세요.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <unistd.h>
-#include <sys/wait.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <signal.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include "tcp_server.h"
-#include "../defineshit.h"
-
-#include <signal.h>
-#include <errno.h>
+#include <sys/select.h>
+#include <sys/wait.h>
+#include <endian.h>
 
 // 종료 플래그 (volatile sig_atomic_t 타입은 신호 핸들러에서 안전하게 사용할 수 있음)
 volatile sig_atomic_t server_running = 1;
@@ -29,147 +32,125 @@ void sigchld_handler(int signo)
 
 #define PORT 49999
 #define BACKLOG 5
-/**
- * Header format:
- * 8 bytes: file type
- * 8 bytes: file size
- */
 #define HEADER_SIZE 16
+#define BUFFER_SIZE 1024
+#define JUDGE_RESULT_SIZE 1024
 
-int send_text_result(int client_fd, const char *text)
+// client connection status
+typedef enum
 {
-    size_t total_sent = 0;
-    size_t text_len = strlen(text);
-    ssize_t sent;
+    STATE_READING_HEADER,
+    STATE_READING_FILE,
+    STATE_WAIT_JUDGE,
+    STATE_SENDING_RESULT,
+    STATE_DONE
+} conn_state;
 
-    while (total_sent < text_len)
+/**
+ * @brief The client connection structure
+ */
+typedef struct client_conn
+{
+    int fd;                               // client socket file descriptor
+    struct sockaddr_in addr;              // client address
+    conn_state state;                     // connection state
+    char header[HEADER_SIZE];             // header
+    size_t header_bytes;                  // header bytes received
+    uint64_t file_size;                   // sent file size
+    uint64_t file_received;               // received file size
+    FILE *fp;                             // file pointer
+    int judge_pipe_fd;                    // judge process pipe file descriptor
+    char judge_result[JUDGE_RESULT_SIZE]; // judge result
+    size_t judge_result_len;              // size of judge result
+    size_t judge_sent;                    // sent judge result size
+    struct client_conn *next;             // linked list next pointer
+} client_conn;
+
+static client_conn *conn_list = NULL;
+
+/**
+ * @brief Set the file descriptor to non-blocking mode
+ * @param fd The file descriptor
+ */
+static void set_nonblocking(int fd)
+{
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0)
     {
-        sent = send(client_fd, text + total_sent, text_len - total_sent, 0);
-        if (sent < 0)
-        {
-            perror("send failed");
-            return -1;
-        }
-        total_sent += sent;
+        perror("fcntl(F_GETFL) failed");
+        exit(EXIT_FAILURE);
     }
-    return 0;
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+        perror("fcntl(F_SETFL) failed");
+        exit(EXIT_FAILURE);
+    }
 }
 
-ssize_t read_multiple_bytes(int sockfd, void *buffer, size_t count)
+/**
+ * @brief Add the connection to the list
+ * @param conn The client connection
+ */
+static void add_connection(client_conn *conn)
 {
-    ssize_t nread = 0;
-    ssize_t n;
-    char *buf = (char *)buffer;
+    conn->next = conn_list;
+    conn_list = conn;
+}
 
-    while (nread < count)
+/**
+ * @brief Remove the connection from the list
+ * @param conn The client connection
+ */
+static void remove_connection(client_conn *conn)
+{
+    client_conn **p = &conn_list;
+    while (*p)
     {
-        n = read(sockfd, buf + nread, count - nread);
-
-        if (n < 0)
-            return -1;
-        else if (n == 0)
+        if (*p == conn)
+        {
+            *p = conn->next;
             break;
-
-        nread += n;
+        }
+        p = &(*p)->next;
     }
-
-    return nread;
+    if (conn->fp)
+        fclose(conn->fp);
+    if (conn->fd >= 0)
+        close(conn->fd);
+    if (conn->judge_pipe_fd >= 0)
+        close(conn->judge_pipe_fd);
+    free(conn);
 }
 
-void handle_client(int client_fd, struct sockaddr_in client_addr)
+/**
+ * @brief Spawn the judge process
+ * @param conn The client connection
+ */
+static void spawn_judge(client_conn *conn)
 {
-    printf("Client connected: %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-
-    // printf("Reading header\n");
-    char header[HEADER_SIZE];
-    if (read_multiple_bytes(client_fd, header, HEADER_SIZE) != HEADER_SIZE)
-    {
-        perror("read header failed");
-        close(client_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    char msg_type[9];
-    memcpy(msg_type, header, 8);
-    msg_type[8] = '\0';
-
-    uint64_t net_file_size;
-    memcpy(&net_file_size, header + 8, 8);
-    uint64_t file_size = be64toh(net_file_size);
-
-    // printf("Received header: %s, file size: %lu\n", msg_type, file_size);
-
-    FILE *file = fopen("files/receive/received_file.c", "wb");
-    if (file == NULL)
-    {
-        perror("fopen failed");
-        close(client_fd);
-        exit(EXIT_FAILURE);
-    }
-    uint64_t remaining_size = file_size;
-    char buffer[1024];
-    ssize_t nread;
-
-    while (remaining_size > 0)
-    {
-        size_t read_size = remaining_size < sizeof(buffer) ? remaining_size : sizeof(buffer);
-        nread = read_multiple_bytes(client_fd, buffer, read_size);
-
-        if (nread < 0)
-        {
-            perror("read file failed");
-            fclose(file);
-            close(client_fd);
-            exit(EXIT_FAILURE);
-        }
-
-        fwrite(buffer, 1, nread, file);
-        remaining_size -= nread;
-    }
-
-    if (remaining_size != 0)
-    {
-        perror("file size mismatch");
-        fclose(file);
-        close(client_fd);
-        exit(EXIT_FAILURE);
-    }
-    else
-    {
-        // printf("File received successfully\n");
-        // if (send_text_result(client_fd, "File received successfully\n") == -1)
-        // {
-        //     close(client_fd);
-        //     exit(EXIT_FAILURE);
-        // }
-    }
-
-    fclose(file);
-
     int pipe_fd[2];
-    if (pipe(pipe_fd) == -1)
+    if (pipe(pipe_fd) < 0)
     {
         perror("pipe failed");
-        close(client_fd);
-        exit(EXIT_FAILURE);
+        conn->state = STATE_DONE;
+        return;
     }
-
-    char *result;
+    set_nonblocking(pipe_fd[0]);
     pid_t pid = fork();
     if (pid < 0)
     {
         perror("fork failed");
         close(pipe_fd[0]);
         close(pipe_fd[1]);
-        close(client_fd);
-        exit(EXIT_FAILURE);
+        conn->state = STATE_DONE;
+        return;
     }
     else if (pid == 0)
     {
         close(pipe_fd[0]);
-        if (dup2(pipe_fd[1], STDOUT_FILENO) == -1)
+        if (dup2(pipe_fd[1], STDOUT_FILENO) < 0)
         {
-            perror("dup2(stdout) failed");
+            perror("dup2 failed");
             exit(EXIT_FAILURE);
         }
         close(pipe_fd[1]);
@@ -179,54 +160,148 @@ void handle_client(int client_fd, struct sockaddr_in client_addr)
     }
     else
     {
+        conn->judge_pipe_fd = pipe_fd[0];
         close(pipe_fd[1]);
-
-        char result_buffer[1024];
-        size_t total_read = 0;
-        ssize_t r;
-        while ((r = read(pipe_fd[0], buffer, sizeof(buffer))) > 0)
-        {
-            if (total_read + r < sizeof(result_buffer))
-            {
-                memcpy(result_buffer + total_read, buffer, r);
-                total_read += r;
-            }
-            else
-            {
-                break;
-            }
-        }
-        close(pipe_fd[0]);
-        int status;
-        waitpid(pid, &status, 0);
-        if (WIFEXITED(status))
-        {
-            printf("judge process exited with status %d\n", WEXITSTATUS(status));
-        }
-        else
-        {
-            printf("judge process exited abnormally\n");
-        }
-
-        if (total_read < sizeof(result_buffer))
-        {
-            result_buffer[total_read] = '\0';
-            result = result_buffer;
-        }
-        else
-        {
-            result = "Result too long";
-        }
-        if (send_text_result(client_fd, result) == -1)
-        {
-            close(client_fd);
-            exit(EXIT_FAILURE);
-        }
+        conn->state = STATE_WAIT_JUDGE;
     }
-    printf("Judge finished\n");
+}
 
-    close(client_fd);
-    exit(EXIT_SUCCESS);
+/**
+ * @brief Read the header from the client
+ * @param conn The client connection
+ */
+static void handle_read_header(client_conn *conn)
+{
+    ssize_t n = recv(conn->fd, conn->header + conn->header_bytes, HEADER_SIZE - conn->header_bytes, 0);
+    if (n < 0)
+    {
+        if (errno != EWOULDBLOCK && errno != EAGAIN)
+        {
+            perror("recv header failed");
+            conn->state = STATE_DONE;
+        }
+        return;
+    }
+    else if (n == 0)
+    {
+        conn->state = STATE_DONE;
+        return;
+    }
+    conn->header_bytes += n;
+    if (conn->header_bytes == HEADER_SIZE)
+    {
+        uint64_t net_file_size;
+        memcpy(&net_file_size, conn->header + 8, 8);
+        conn->file_size = be64toh(net_file_size);
+        conn->file_received = 0;
+        conn->fp = fopen("files/receive/received_file.c", "wb");
+        if (!conn->fp)
+        {
+            perror("fopen failed");
+            conn->state = STATE_DONE;
+            return;
+        }
+        conn->state = STATE_READING_FILE;
+    }
+}
+
+/**
+ * @brief Read the file from the client
+ * @param conn The client connection
+ */
+static void handle_read_file(client_conn *conn)
+{
+    char buf[BUFFER_SIZE];
+    ssize_t n = recv(conn->fd, buf, BUFFER_SIZE, 0);
+    if (n < 0)
+    {
+        if (errno != EWOULDBLOCK && errno != EAGAIN)
+        {
+            perror("recv file failed");
+            conn->state = STATE_DONE;
+        }
+        return;
+    }
+    else if (n == 0)
+    {
+        conn->state = STATE_DONE;
+        return;
+    }
+    size_t written = fwrite(buf, 1, n, conn->fp);
+    if (written != (size_t)n)
+    {
+        perror("fwrite failed");
+        conn->state = STATE_DONE;
+        return;
+    }
+    conn->file_received += n;
+    if (conn->file_received >= conn->file_size)
+    {
+        fclose(conn->fp);
+        conn->fp = NULL;
+        spawn_judge(conn);
+    }
+}
+
+/**
+ * @brief Read the judge result from the pipe
+ * @param conn The client connection
+ */
+static void handle_read_judge(client_conn *conn)
+{
+    char buf[BUFFER_SIZE];
+    ssize_t n = read(conn->judge_pipe_fd, buf, sizeof(buf));
+    if (n < 0)
+    {
+        if (errno != EWOULDBLOCK && errno != EAGAIN)
+        {
+            perror("read judge failed");
+            conn->state = STATE_DONE;
+        }
+        return;
+    }
+    else if (n == 0)
+    {
+        conn->judge_result[conn->judge_result_len] = '\0';
+        conn->state = STATE_SENDING_RESULT;
+        int status;
+        while (waitpid(-1, &status, WNOHANG) > 0)
+            ;
+        return;
+    }
+    if (conn->judge_result_len + n < JUDGE_RESULT_SIZE - 1)
+    {
+        memcpy(conn->judge_result + conn->judge_result_len, buf, n);
+        conn->judge_result_len += n;
+    }
+    else
+    {
+        conn->judge_result_len = JUDGE_RESULT_SIZE - 1;
+        conn->state = STATE_SENDING_RESULT;
+    }
+}
+
+/**
+ * @brief Send the judge result to the client
+ * @param conn The client connection
+ */
+static void handle_send_result(client_conn *conn)
+{
+    ssize_t n = send(conn->fd, conn->judge_result + conn->judge_sent, conn->judge_result_len - conn->judge_sent, 0);
+    if (n < 0)
+    {
+        if (errno != EWOULDBLOCK && errno != EAGAIN)
+        {
+            perror("send result failed");
+            conn->state = STATE_DONE;
+        }
+        return;
+    }
+    conn->judge_sent += n;
+    if (conn->judge_sent >= conn->judge_result_len)
+    {
+        conn->state = STATE_DONE;
+    }
 }
 
 int start_tcp_server(void)
@@ -244,85 +319,136 @@ int start_tcp_server(void)
         perror("sigaction SIGINT failed");
         exit(EXIT_FAILURE);
     }
-    int server_fd, client_fd;
-    struct sockaddr_in address;
-    int opt = 1;
-    socklen_t addrlen = sizeof(address);
 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0)
     {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
-
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) == -1)
+    int opt = 1;
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     {
         perror("setsockopt failed");
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
-
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
-
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == -1)
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
     {
         perror("bind failed");
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
-
-    if (listen(server_fd, BACKLOG) == -1)
+    if (listen(listen_fd, BACKLOG) < 0)
     {
         perror("listen failed");
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
+    set_nonblocking(listen_fd);
+    printf("TCP server listening on port %d\n", PORT);
 
-    printf("TCP server waiting for client on port %d\n", PORT);
-
+    fd_set read_fds, write_fds;
+    int max_fd;
     while (1)
     {
-        socklen_t client_addr_len = sizeof(address);
-        if ((client_fd = accept(server_fd, (struct sockaddr *)&address, &client_addr_len)) == -1)
+        if (errno == EINTR && !server_running)
+            break;
+        FD_ZERO(&read_fds);
+        FD_ZERO(&write_fds);
+        FD_SET(listen_fd, &read_fds);
+        max_fd = listen_fd;
+
+        for (client_conn *conn = conn_list; conn; conn = conn->next)
         {
-            if (errno == EINTR)
+            if (conn->state == STATE_READING_HEADER || conn->state == STATE_READING_FILE)
             {
-                if (!server_running)
+                FD_SET(conn->fd, &read_fds);
+                if (conn->fd > max_fd)
+                    max_fd = conn->fd;
+            }
+            else if (conn->state == STATE_WAIT_JUDGE)
+            {
+                FD_SET(conn->judge_pipe_fd, &read_fds);
+                if (conn->judge_pipe_fd > max_fd)
+                    max_fd = conn->judge_pipe_fd;
+            }
+            else if (conn->state == STATE_SENDING_RESULT)
+            {
+                FD_SET(conn->fd, &write_fds);
+                if (conn->fd > max_fd)
+                    max_fd = conn->fd;
+            }
+        }
+
+        int activity = select(max_fd + 1, &read_fds, &write_fds, NULL, NULL);
+        if (activity < 0)
+        {
+            perror("select failed");
+            break;
+        }
+
+        if (FD_ISSET(listen_fd, &read_fds))
+        {
+            struct sockaddr_in cli_addr;
+            socklen_t cli_len = sizeof(cli_addr);
+            int client_fd = accept(listen_fd, (struct sockaddr *)&cli_addr, &cli_len);
+            if (client_fd >= 0)
+            {
+                set_nonblocking(client_fd);
+                client_conn *conn = malloc(sizeof(client_conn));
+                if (!conn)
                 {
-                    break;
-                }
-                else
-                {
+                    perror("malloc failed");
+                    close(client_fd);
                     continue;
                 }
+                memset(conn, 0, sizeof(client_conn));
+                conn->fd = client_fd;
+                conn->addr = cli_addr;
+                conn->state = STATE_READING_HEADER;
+                conn->header_bytes = 0;
+                conn->file_size = 0;
+                conn->file_received = 0;
+                conn->fp = NULL;
+                conn->judge_pipe_fd = -1;
+                conn->judge_result_len = 0;
+                conn->judge_sent = 0;
+                add_connection(conn);
+                printf("New client connected: %s:%d\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
             }
-            perror("accept failed");
-            close(server_fd);
-            exit(EXIT_FAILURE);
         }
 
-        pid_t pid = fork();
-        if (pid < 0)
+        client_conn *conn = conn_list;
+        client_conn *next;
+        while (conn)
         {
-            perror("fork failed");
-            close(client_fd);
-            close(server_fd);
-            exit(EXIT_FAILURE);
-        }
-        else if (pid == 0)
-        {
-            close(server_fd);
-            handle_client(client_fd, address);
-        }
-        else
-        {
-            close(client_fd);
+            next = conn->next;
+            if (conn->state == STATE_READING_HEADER && FD_ISSET(conn->fd, &read_fds))
+            {
+                handle_read_header(conn);
+            }
+            else if (conn->state == STATE_READING_FILE && FD_ISSET(conn->fd, &read_fds))
+            {
+                handle_read_file(conn);
+            }
+            else if (conn->state == STATE_WAIT_JUDGE && FD_ISSET(conn->judge_pipe_fd, &read_fds))
+            {
+                handle_read_judge(conn);
+            }
+            else if (conn->state == STATE_SENDING_RESULT && FD_ISSET(conn->fd, &write_fds))
+            {
+                handle_send_result(conn);
+            }
+            if (conn->state == STATE_DONE)
+            {
+                remove_connection(conn);
+            }
+            conn = next;
         }
     }
-
-    printf("Server shutting down\n");
-    close(server_fd);
+    close(listen_fd);
     return 0;
 }
