@@ -18,7 +18,6 @@ ssize_t send_all(int sockfd, const void *buffer, size_t length)
     while (total_sent < length)
     {
         ssize_t sent = send(sockfd, buf + total_sent, length - total_sent, 0);
-        // Should not reach here...
         if (sent <= 0)
         {
             printf("send() failed\n");
@@ -29,7 +28,7 @@ ssize_t send_all(int sockfd, const void *buffer, size_t length)
     return total_sent;
 }
 
-int send_file(const char *server_ip, int port, const char *filename)
+int connect_to_server(const char *server_ip, int port)
 {
     int sockfd;
     struct sockaddr_in server_addr;
@@ -57,11 +56,15 @@ int send_file(const char *server_ip, int port, const char *filename)
         return -1;
     }
 
+    return sockfd;
+}
+
+int send_file_data(int sockfd, const char *filename)
+{
     FILE *fp = fopen(filename, "rb");
     if (!fp)
     {
         perror("fopen failed");
-        close(sockfd);
         return -1;
     }
 
@@ -79,7 +82,6 @@ int send_file(const char *server_ip, int port, const char *filename)
     {
         perror("failed to send header");
         fclose(fp);
-        close(sockfd);
         return -1;
     }
 
@@ -91,14 +93,17 @@ int send_file(const char *server_ip, int port, const char *filename)
         {
             perror("failed to send file");
             fclose(fp);
-            close(sockfd);
             return -1;
         }
     }
 
     printf("file '%s' sent (size: %lu bytes)\n", filename, file_size);
     fclose(fp);
+    return 0;
+}
 
+int receive_judge_result(int sockfd)
+{
     char result_buf[4096];
     size_t total_received = 0;
     ssize_t r;
@@ -112,14 +117,33 @@ int send_file(const char *server_ip, int port, const char *filename)
     if (r < 0)
     {
         perror("recv failed");
-        close(sockfd);
         return -1;
     }
     result_buf[total_received] = '\0';
 
     printf("Judge result received:\n%s\n", result_buf);
+    return 0;
+}
 
+void close_connection(int sockfd)
+{
     close(sockfd);
+}
+
+int send_file(int sockfd, const char *filename)
+{
+    if (send_file_data(sockfd, filename) < 0)
+    {
+        close_connection(sockfd);
+        return -1;
+    }
+
+    if (receive_judge_result(sockfd) < 0)
+    {
+        close_connection(sockfd);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -135,6 +159,17 @@ int main(int argc, char *argv[])
     int port = atoi(argv[2]);
     const char *filename = argv[3];
 
-    return send_file(server_ip, port, filename);
+    int sockfd = connect_to_server(server_ip, port);
+    if (sockfd < 0)
+    {
+        return 1;
+    }
+    int ret = send_file(sockfd, filename);
+    if (ret < 0)
+    {
+        return 1;
+    }
+    close_connection(sockfd);
+    return 0;
 }
 #endif
