@@ -1,72 +1,17 @@
 #include "tcp_server.h"
-#include "../defineshit.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <signal.h>
 #include <arpa/inet.h>
-#include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <endian.h>
 #include <time.h>
 
-// server running flag (volatile sig_atomic_t는 signal handler에서 안전하게 사용 가능)
+// server running flag (volatile sig_atomic_t is safe to use in signal handler)
 volatile sig_atomic_t server_running = 1;
-
-void sigint_handler(int signum)
-{
-    (void)signum;       // remove unused warning
-    server_running = 0; // set the flag to stop the server
-}
-
-void sigchld_handler(int signo)
-{
-    (void)signo; // remove unused warning
-    while (waitpid(-1, NULL, WNOHANG) > 0)
-        ;
-}
-
-#define PORT 49999
-#define BACKLOG 5
-#define HEADER_SIZE 16
-#define BUFFER_SIZE 1024
-#define JUDGE_RESULT_SIZE 1024
-
-// client connection state
-typedef enum
-{
-    STATE_READING_HEADER,
-    STATE_READING_FILE,
-    STATE_WAIT_JUDGE,
-    STATE_SENDING_RESULT,
-    STATE_DONE
-} conn_state;
-
-/**
- * @brief client connection structure
- */
-typedef struct client_conn
-{
-    int fd;                               // client socket file descriptor
-    struct sockaddr_in addr;              // client address
-    conn_state state;                     // client connection state
-    char header[HEADER_SIZE];             // header buffer
-    size_t header_bytes;                  // byte size of the header received
-    uint64_t file_size;                   // byte size of the file to send
-    uint64_t file_received;               // byte size of the file received
-    FILE *fp;                             // file pointer for the received file
-    int judge_pipe_fd;                    // pipe file descriptor for the judge process / non-blocking
-    char judge_result[JUDGE_RESULT_SIZE]; // judge result buffer
-    size_t judge_result_len;              // judge result byte size
-    size_t judge_sent;                    // byte size of the judge result sent
-    char source_filename[256];            // source file name
-    struct client_conn *next;             // next client connection
-} client_conn;
 
 // linked list of client connections
 static client_conn *conn_list = NULL;
@@ -315,10 +260,19 @@ static void handle_send_result(client_conn *conn)
     }
 }
 
-/**
- * @brief start TCP server
- * @return 0 on success.
- */
+void sigint_handler(int signum)
+{
+    (void)signum;       // remove unused warning
+    server_running = 0; // set the flag to stop the server
+}
+
+void sigchld_handler(int signo)
+{
+    (void)signo; // remove unused warning
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
+}
+
 int start_tcp_server(void)
 {
     signal(SIGCHLD, sigchld_handler);

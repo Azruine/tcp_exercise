@@ -1,6 +1,9 @@
 #ifndef TCP_CLIENT_H
 #define TCP_CLIENT_H
 
+#define HEADER_SIZE 16
+#define TEXTFILE "TEXTFILE"
+
 /**
  * @brief Send all data in the buffer
  * @param sockfd socket file descriptor

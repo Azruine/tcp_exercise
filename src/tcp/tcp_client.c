@@ -8,9 +8,6 @@
 #include "tcp_client.h"
 #include "../defineshit.h"
 
-#define HEADER_SIZE 16
-#define TEXTFILE "TEXTFILE"
-
 ssize_t send_all(int sockfd, const void *buffer, size_t length)
 {
     size_t total_sent = 0;
