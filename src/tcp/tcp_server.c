@@ -135,8 +135,8 @@ static void handle_read_header(client_conn *conn)
         conn->file_received = 0;
 
         char filename[256];
-        snprintf(filename, sizeof(filename), "files/receive/%s_%ld.c",
-                 inet_ntoa(conn->addr.sin_addr), time(NULL));
+        snprintf(filename, sizeof(filename), "files/receive/%s_%d_%ld.c",
+                 inet_ntoa(conn->addr.sin_addr), ntohs(conn->addr.sin_port), time(NULL));
 
         strncpy(conn->source_filename, filename, sizeof(conn->source_filename));
         conn->source_filename[sizeof(conn->source_filename) - 1] = '\0';
