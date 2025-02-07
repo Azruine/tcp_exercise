@@ -1,14 +1,4 @@
 #include "tcp_server.h"
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <arpa/inet.h>
-#include <sys/select.h>
-#include <sys/wait.h>
-#include <endian.h>
-#include <time.h>
 
 // server running flag (volatile sig_atomic_t is safe to use in signal handler)
 volatile sig_atomic_t server_running = 1;
@@ -273,7 +263,7 @@ void sigchld_handler(int signo)
         ;
 }
 
-int start_tcp_server(void)
+int start_tcp_server(int port)
 {
     signal(SIGCHLD, sigchld_handler);
 
@@ -303,7 +293,7 @@ int start_tcp_server(void)
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);
+    addr.sin_port = htons(port);
     addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
     {
@@ -316,7 +306,7 @@ int start_tcp_server(void)
         exit(EXIT_FAILURE);
     }
     set_nonblocking(listen_fd);
-    printf("TCP server listening on port %d\n", PORT);
+    printf("TCP server listening on port %d\n", port);
 
     fd_set read_fds, write_fds;
     int max_fd;

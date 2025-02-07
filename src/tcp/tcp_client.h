@@ -1,6 +1,15 @@
 #ifndef TCP_CLIENT_H
 #define TCP_CLIENT_H
 
+#include "../defineshit.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <endian.h>
+
 #define HEADER_SIZE 16
 #define TEXTFILE "TEXTFILE"
 

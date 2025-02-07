@@ -6,6 +6,16 @@
 #include <stdint.h>
 #include <signal.h>
 #include <netinet/in.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+#include <sys/wait.h>
+#include <endian.h>
+#include <time.h>
 
 #define PORT 49999
 #define BACKLOG 5
@@ -60,6 +70,6 @@ void sigchld_handler(int signo);
  * @brief Start the TCP server
  * @return 0 on success, exit() on fatal error.
  */
-int start_tcp_server(void);
+int start_tcp_server(int port);
 
 #endif // TCP_SERVER_H

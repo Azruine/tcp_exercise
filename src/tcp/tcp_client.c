@@ -1,12 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <endian.h>
+
 #include "tcp_client.h"
-#include "../defineshit.h"
 
 ssize_t send_all(int sockfd, const void *buffer, size_t length)
 {
