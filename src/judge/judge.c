@@ -245,7 +245,7 @@ int main(int argc, char *argv[])
     char executable_path[256];
     snprintf(executable_path, sizeof(executable_path), "temp/%s", base_name);
 
-    // 컴파일 단계
+    // compile the submission
     if (compile_submission(source_path, executable_path) != 0)
     {
         FILE *err_fp = fopen(COMPILE_ERROR_FILE, "r");
