@@ -1,4 +1,4 @@
-#include "tcp_server.h"
+#include "tcp/tcp_server.h"
 
 // server running flag (volatile sig_atomic_t is safe to use in signal handler)
 volatile sig_atomic_t server_running = 1;

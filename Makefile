@@ -7,7 +7,5 @@ configure:
 	cd build && cmake ..
 
 clean:
-	rm -rf build
-	@mkdir -p build
-	cd build && cmake ..
+	rm -rf build/*
 

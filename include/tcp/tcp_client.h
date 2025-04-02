@@ -1,14 +1,16 @@
+#pragma once
 #ifndef TCP_CLIENT_H
 #define TCP_CLIENT_H
 
-#include "../defineshit.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <unistd.h>
 #include <arpa/inet.h>
 #include <endian.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "../defineshit.h"
 
 #define HEADER_SIZE 16
 #define TEXTFILE "TEXTFILE"
@@ -59,4 +61,4 @@ void close_connection(int sockfd);
  */
 int send_file(int sockfd, const char *filename);
 
-#endif // TCP_CLIENT_H
+#endif  // TCP_CLIENT_H

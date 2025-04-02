@@ -32,4 +32,4 @@ typedef unsigned long size_t;
 #ifndef errno
 extern int errno;
 #endif
-#endif // _DEFINESHIT_H
+#endif  // _DEFINESHIT_H
