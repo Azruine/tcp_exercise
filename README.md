@@ -18,6 +18,6 @@ make configure 이후 실행할 수 있으며, 프로젝트 전체를 빌드한�
 
 ## 사용 방법
 
-```build/src/main``` 을 실행하면 TCP 서버가 49999 포트에서 열린다.
+```build/src/server``` 을 실행하면 TCP 서버가 49999 포트에서 열린다.
 
-```build/src/client_test <ip> <port> <file>``` 을 실행하면 서버와 TCP 통신을 수립한 후, 파일을 전송하고 채점 결과를 전송받는다.
+```build/src/client <ip> <port> <file>``` 을 실행하면 서버와 TCP 통신을 수립한 후, 파일을 전송하고 채점 결과를 전송받는다.
